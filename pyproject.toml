@@ -1,0 +1,19 @@
+[project]
+name = "cateye-by-api"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "beautifulsoup4>=4.13.4",
+    "google-adk>=1.5.0",
+    "google-genai>=1.23.0",
+    "opencv-python>=4.11.0.86",
+    "pandas>=2.3.0",
+    "pillow>=11.2.1",
+    "python-dotenv>=1.1.1",
+    "requests>=2.32.4",
+    "segment-anything-py>=1.0.1",
+    "torch>=2.7.1",
+    "torchvision>=0.22.1",
+]
