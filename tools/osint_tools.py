@@ -6,13 +6,12 @@ import os
 import json
 import base64
 import requests
-from typing import Dict, List, Any
 from dotenv import load_dotenv
 import google.genai as genai
-from playwright.sync_api import sync_playwright
+import pandas as pd
+from playwright.async_api import async_playwright
 
 # Import our existing tools
-from main import reverse_search_local_image
 from sam_segmenter import segment_image_to_chunks
 
 load_dotenv()
@@ -20,172 +19,6 @@ load_dotenv()
 # Configure Gemini client
 client = genai.Client(api_key=os.getenv('GEMINI_API_KEY', 'your_gemini_api_key_here'))
 
-def compare_images(image_path1: str, image_path2: str, comparison_type: str = "detailed") -> str:
-    """
-    Compare two images for OSINT investigation to identify similarities, differences, and connections.
-    
-    Args:
-        image_path1: Path to the first image file
-        image_path2: Path to the second image file  
-        comparison_type: Type of comparison - "detailed", "location", or "quick"
-    
-    Returns:
-        Detailed comparison results as text
-    """
-    if not os.path.exists(image_path1):
-        return f"Error: First image file {image_path1} not found"
-    
-    if not os.path.exists(image_path2):
-        return f"Error: Second image file {image_path2} not found"
-    
-    if comparison_type == "detailed":
-        prompt = """
-        Compare these two images for OSINT investigation. Provide a comprehensive analysis:
-
-        VISUAL COMPARISON:
-        1. SIMILARITIES: What elements are the same or very similar between the images?
-        2. DIFFERENCES: What are the key differences between the images?
-        3. TEMPORAL ANALYSIS: Do these appear to be taken at different times? Evidence?
-        4. LOCATION ANALYSIS: Are these the same location? Different angles/viewpoints?
-        5. PEOPLE: Same people in both images? Different people? Changes in appearance?
-        6. OBJECTS: Same objects/vehicles? New or missing items?
-        7. ENVIRONMENTAL CHANGES: Weather, lighting, seasonal differences?
-        8. ARCHITECTURAL DETAILS: Building changes, construction, modifications?
-
-        INVESTIGATIVE CONCLUSIONS:
-        - Are these images from the same location?
-        - Time relationship between images (same time, different times, how far apart?)
-        - Evidence of staging or manipulation?
-        - What can we conclude about the subjects/locations?
-        - Confidence level for each conclusion (High/Medium/Low)
-
-        OSINT LEADS:
-        - Which image provides better investigative leads?
-        - What questions do the differences raise?
-        - What additional verification is needed?
-        """
-    elif comparison_type == "location":
-        prompt = """
-        Focus specifically on location analysis between these two images:
-
-        LOCATION COMPARISON:
-        1. SAME LOCATION INDICATORS: Architectural features, landmarks, unique elements
-        2. DIFFERENT LOCATION INDICATORS: Background differences, architectural styles
-        3. VIEWPOINT ANALYSIS: Same location but different angles/distances?
-        4. GEOLOCATION CLUES: Street signs, building numbers, distinctive features
-        5. ENVIRONMENTAL CONTEXT: Vegetation, terrain, urban vs rural
-
-        CONCLUSION:
-        - Are these the same location? (Confidence: High/Medium/Low)
-        - If same location: What's the spatial relationship?
-        - If different locations: How far apart might they be?
-        - Best geolocation leads from comparison
-        """
-    else:  # quick comparison
-        prompt = """
-        Quick comparison of these two images for OSINT:
-        
-        1. SAME SCENE: Yes/No - are these the same location/scene?
-        2. TIME DIFFERENCE: Do these appear taken at different times?
-        3. KEY DIFFERENCES: 3-5 most important differences
-        4. KEY SIMILARITIES: 3-5 most important similarities  
-        5. INVESTIGATIVE VALUE: Which image is more useful for investigation?
-        6. CONCLUSION: Brief summary of relationship between images
-        """
-    
-    try:
-        with open(image_path1, 'rb') as f:
-            image_data1 = f.read()
-        
-        with open(image_path2, 'rb') as f:
-            image_data2 = f.read()
-        
-        response = client.models.generate_content(
-            model='gemini-2.5-pro',
-            contents=[
-                prompt,
-                "First image:",
-                {"inline_data": {"mime_type": "image/png", "data": base64.b64encode(image_data1).decode()}},
-                "Second image:",
-                {"inline_data": {"mime_type": "image/png", "data": base64.b64encode(image_data2).decode()}}
-            ]
-        )
-        
-        return response.text
-    except Exception as e:
-        return f"Error comparing images: {str(e)}"
-
-def analyze_image(image_path: str, analysis_type: str) -> str:
-    """
-    Analyze an image using AI vision to extract detailed information for OSINT purposes.
-    
-    Args:
-        image_path: Path to the image file to analyze
-        analysis_type: Type of analysis - "general" or "chunk"
-    
-    Returns:
-        Detailed analysis results as text
-    """
-    if not os.path.exists(image_path):
-        return f"Error: Image file {image_path} not found"
-    
-    if analysis_type == "general":
-        prompt = """
-        Analyze this image for OSINT investigation. Provide structured information:
-        
-        1. LOCATION TYPE: Indoor/Outdoor, Private/Public space
-        2. ENVIRONMENT: Urban/Rural/Suburban/Industrial/Natural
-        3. PEOPLE: Count, visible characteristics, activities
-        4. OBJECTS: Vehicles, signs, landmarks, distinctive items
-        5. TEXT: Any readable text, signs, license plates, brands
-        6. ARCHITECTURE: Building styles, architectural details
-        7. TIME INDICATORS: Season, time of day, weather, lighting
-        8. GEOGRAPHIC CLUES: Vegetation, landscape, architectural style
-        9. CULTURAL INDICATORS: Language, symbols, cultural markers
-        10. NOTABLE DETAILS: Unique or identifying features
-        11. List of hypotheses about exact location (address, landmark, coordinates if possible)
-        12. Time/date estimation (season, lighting, shadows, attire)
-        13. People identification (describe features, not names)
-        14. Vehicle analysis (make, model, license plates, distinctive features)
-        15. Technology/equipment visible (cameras, phones, devices)
-        16. Security features (CCTV, barriers, access controls)
-        Be specific and detailed for investigative purposes.
-
-        INVESTIGATIVE LEADS:
-        - Reverse searchable elements (landmarks, signs, distinctive objects)
-        - Cross-referenceable details (architectural styles, vegetation, infrastructure)
-        - Potential verification sources (official buildings, public spaces)
-        
-        Provide confidence levels for each conclusion.
-        """
-    else:  # chunk analysis
-        prompt = """
-        Analyze this image chunk for OSINT purposes:
-        - Main object/element identification
-        - Readable text or symbols
-        - Brand names, logos, identifying marks
-        - Architectural or design details
-        - Any geographic or cultural indicators
-        - Potential for reverse image search
-        
-        Be concise but specific for investigation leads.
-        """
-    
-    try:
-        with open(image_path, 'rb') as f:
-            image_data = f.read()
-        
-        response = client.models.generate_content(
-            model='gemini-2.5-pro',
-            contents=[
-                prompt,
-                {"inline_data": {"mime_type": "image/png", "data": base64.b64encode(image_data).decode()}}
-            ]
-        )
-        
-        return response.text
-    except Exception as e:
-        return f"Error analyzing image: {str(e)}"
 
 def google_search(query: str, num_results: int = 10) -> str:
     """
@@ -255,6 +88,87 @@ def google_search(query: str, num_results: int = 10) -> str:
     except Exception as e:
         return f"Error performing Google search: {str(e)}"
 
+
+def upload_image_to_imgbb(image_path):
+    """Upload local image to imgbb and return the URL"""
+    api_key = os.getenv('IMGBB_API_KEY')
+
+    with open(image_path, 'rb') as image_file:
+        image_data = base64.b64encode(image_file.read()).decode('utf-8')
+
+    url = "https://api.imgbb.com/1/upload"
+    payload = {
+        'key': api_key,
+        'image': image_data
+    }
+
+    response = requests.post(url, data=payload)
+    result = response.json()
+
+    if result['success']:
+        return result['data']['url']
+    else:
+        raise Exception(f"Failed to upload image: {result}")
+
+
+def reverse_image_search(image_url):
+    """Perform reverse image search using SerpAPI Google Lens"""
+    api_key = os.getenv('SERP_API_KEY')
+
+    url = "https://serpapi.com/search"
+    params = {
+        'engine': 'google_lens',
+        'url': image_url,
+        'api_key': api_key
+    }
+
+    response = requests.get(url, params=params)
+    return response.json()
+
+
+def results_to_dataframe(results):
+    """Convert SerpAPI results to pandas DataFrame"""
+    if not results or 'visual_matches' not in results:
+        return pd.DataFrame()
+
+    visual_matches = results['visual_matches']
+    df = pd.DataFrame(visual_matches)
+
+    # Select most relevant columns
+    columns_to_keep = ['position', 'title', 'link', 'source', 'thumbnail',
+                       'image', 'thumbnail_width', 'thumbnail_height',
+                       'image_width', 'image_height']
+
+    # Keep only columns that exist in the DataFrame
+    available_columns = [col for col in columns_to_keep if col in df.columns]
+    df = df[available_columns]
+
+    return df
+
+
+def reverse_search_local_image(image_path):
+    """Main function: upload image and perform reverse search"""
+    try:
+        # Upload image to imgbb
+        image_url = upload_image_to_imgbb(image_path)
+        print(f"Image uploaded to: {image_url}")
+
+        # Perform reverse image search
+        results = reverse_image_search(image_url)
+
+        # Convert to DataFrame
+        df = results_to_dataframe(results)
+
+        return {
+            'raw_results': results,
+            'dataframe': df
+        }
+
+    except Exception as e:
+        print(f"Error: {e}")
+        return None
+
+
 def google_lens_search(image_path: str) -> str:
     """
     Perform reverse image search using Google Lens to find similar images and identify objects/locations.
@@ -272,7 +186,7 @@ def google_lens_search(image_path: str) -> str:
         result = reverse_search_local_image(image_path)
         if result and 'dataframe' in result:
             df = result['dataframe']
-            matches = df.to_dict('records')[:15]  # Top 15 matches
+            matches = df.to_dict('records')[:50]  # Top 50 matches
             
             search_summary = {
                 'total_matches': len(df),
@@ -440,7 +354,7 @@ def fetch_web_content(url: str, search_context: str) -> str:
     except Exception as e:
         return f"Error fetching web content from {url}: {str(e)}"
 
-def fetch_web_content_playwright(url: str, search_context: str, capture_images: bool = True) -> str:
+async def fetch_web_content_playwright(url: str, search_context: str, capture_images: bool = True) -> str:
     """
     Advanced web content fetching using Playwright for complex sites that require JavaScript execution.
     Can capture page screenshots and extract images for LLM analysis.
@@ -454,31 +368,32 @@ def fetch_web_content_playwright(url: str, search_context: str, capture_images: 
         Comprehensive page dump including text content, images (as base64), and metadata
     """
     try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            context = browser.new_context(
+        async with async_playwright() as p:
+            browser = await p.chromium.launch(headless=True)
+            context = await browser.new_context(
                 user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
                 viewport={'width': 1920, 'height': 1080}
             )
-            page = context.new_page()
+            page = await context.new_page()
             
             # Navigate to the page with timeout
-            page.goto(url, wait_until='networkidle', timeout=30000)
+            await page.goto(url, wait_until='networkidle', timeout=30000)
             
             # Wait for dynamic content to load
-            page.wait_for_timeout(3000)
+            await page.wait_for_timeout(3000)
             
             # Extract page metadata
-            title = page.title()
+            title = await page.title()
             page_url = page.url
             
             # Extract text content
-            text_content = page.inner_text('body')[:20000]  # Large limit for LLM processing
+            text_content = await page.inner_text('body')
+            text_content = text_content[:20000]  # Large limit for LLM processing
             
             # Extract all visible text from specific elements
-            headings = [h.inner_text() for h in page.query_selector_all('h1, h2, h3, h4, h5, h6')]
-            links = [{'text': link.inner_text(), 'href': link.get_attribute('href')} 
-                    for link in page.query_selector_all('a[href]')][:20]
+            headings = [await h.inner_text() for h in await page.query_selector_all('h1, h2, h3, h4, h5, h6')]
+            links = [{'text': await link.inner_text(), 'href': await link.get_attribute('href')} 
+                    for link in await page.query_selector_all('a[href]')][:20]
             
             # Look for location-related content
             location_keywords = ['address', 'location', 'coordinates', 'GPS', 'street', 'city', 'country', 'latitude', 'longitude']
@@ -486,9 +401,9 @@ def fetch_web_content_playwright(url: str, search_context: str, capture_images: 
             
             # Extract meta tags
             meta_tags = {}
-            for meta in page.query_selector_all('meta'):
-                name = meta.get_attribute('name') or meta.get_attribute('property')
-                content = meta.get_attribute('content')
+            for meta in await page.query_selector_all('meta'):
+                name = await meta.get_attribute('name') or await meta.get_attribute('property')
+                content = await meta.get_attribute('content')
                 if name and content:
                     meta_tags[name] = content
             
@@ -507,7 +422,7 @@ def fetch_web_content_playwright(url: str, search_context: str, capture_images: 
             
             if capture_images:
                 # Take a full page screenshot and save it
-                screenshot = page.screenshot(full_page=True)
+                screenshot = await page.screenshot(full_page=True)
                 result['screenshot_base64'] = base64.b64encode(screenshot).decode()
                 
                 # Save full page screenshot locally
@@ -529,9 +444,9 @@ def fetch_web_content_playwright(url: str, search_context: str, capture_images: 
                 images = []
                 saved_images = []
                 
-                for i, img in enumerate(page.query_selector_all('img[src]')):
-                    src = img.get_attribute('src')
-                    alt = img.get_attribute('alt') or ''
+                for i, img in enumerate(await page.query_selector_all('img[src]')):
+                    src = await img.get_attribute('src')
+                    alt = await img.get_attribute('alt') or ''
                     if src:
                         # Convert relative URLs to absolute
                         if src.startswith('//'):
@@ -543,16 +458,16 @@ def fetch_web_content_playwright(url: str, search_context: str, capture_images: 
                         images.append({
                             'src': src,
                             'alt': alt,
-                            'width': img.get_attribute('width'),
-                            'height': img.get_attribute('height')
+                            'width': await img.get_attribute('width'),
+                            'height': await img.get_attribute('height')
                         })
                         
                         # Try to capture and save individual images
                         if i < 10:  # Limit to first 10 images
                             try:
-                                img_element = page.query_selector(f'img[src="{src}"]')
+                                img_element = await page.query_selector(f'img[src="{src}"]')
                                 if img_element:
-                                    img_screenshot = img_element.screenshot()
+                                    img_screenshot = await img_element.screenshot()
                                     
                                     # Generate unique filename for each image
                                     img_hash = hashlib.md5(src.encode()).hexdigest()[:8]
@@ -567,7 +482,7 @@ def fetch_web_content_playwright(url: str, search_context: str, capture_images: 
                                         'local_path': img_path,
                                         'source_url': src,
                                         'alt_text': alt,
-                                        'title': img.get_attribute('title', ''),
+                                        'title': await img.get_attribute('title', ''),
                                         'description': f"Image from {url} captured with Playwright",
                                         'size_bytes': len(img_screenshot)
                                     })
@@ -588,9 +503,9 @@ def fetch_web_content_playwright(url: str, search_context: str, capture_images: 
                 small_images_b64 = []
                 for img_info in images[:5]:  # Only first 5 images
                     try:
-                        img_element = page.query_selector(f'img[src="{img_info["src"]}"]')
+                        img_element = await page.query_selector(f'img[src="{img_info["src"]}"]')
                         if img_element:
-                            img_screenshot = img_element.screenshot()
+                            img_screenshot = await img_element.screenshot()
                             small_images_b64.append({
                                 'src': img_info['src'],
                                 'alt': img_info['alt'],
@@ -601,7 +516,7 @@ def fetch_web_content_playwright(url: str, search_context: str, capture_images: 
                 
                 result['captured_images_base64'] = small_images_b64
             
-            browser.close()
+            await browser.close()
             return json.dumps(result, indent=2)
             
     except Exception as e:
@@ -657,3 +572,84 @@ End of Report
         
     except Exception as e:
         return f"❌ Error writing report: {str(e)}"
+
+def analyze_images(image_paths: list[str], prompt: str) -> str:
+    """
+    Analyzes one or more images from local paths or remote URLs using a multimodal AI model. This universal tool can describe, compare, and query multiple images in a single call. It can process a list of images, analyze them based on the provided prompt, and return a structured JSON response.
+
+    **Capabilities:**
+    - **Batch Analysis:** Provide a list of image paths/URLs to be analyzed together.
+    - **Comparative Analysis:** Ask the model to compare features across multiple images (e.g., "Which of these images was taken at night?").
+    - **Targeted Search:** Ask the model to find specific features within the set of images (e.g., "Find the image that contains a blue car and describe it.").
+    - **Universal Querying:** Ask any question about the visual content of the images.
+
+    **Important:** The tool instructs the AI to return a JSON object where the keys are the image paths/URLs you provided and the values are the analysis for each image. This allows for structured data retrieval.
+
+    Args:
+        image_paths: A list of strings, where each string is a local file path or a remote image URL.
+        prompt: The specific question or instruction for the AI to follow when analyzing the images.
+
+    Returns:
+        A JSON string mapping each image path/URL to the corresponding analysis text. If an error occurs, a JSON object with an 'error' key is returned.
+    """
+    if not image_paths:
+        return json.dumps({"error": "No image paths provided."})
+
+    system_prompt = """
+You are an expert image analyst. You will be given one or more images and a prompt.
+Your task is to follow the user's prompt for all images provided.
+For each image, you must identify it by its source path or URL, which will be provided after the image data.
+You MUST return your response as a single, valid JSON object.
+The keys of the JSON object MUST be the exact image paths or URLs provided.
+The values should be your text analysis for the corresponding image, based on the user's prompt.
+    """
+
+    contents = [prompt, system_prompt]
+
+    for path in image_paths:
+        try:
+            if path.startswith(('http://', 'https://')):
+                response = requests.get(path, timeout=15)
+                response.raise_for_status()
+                mime_type = response.headers.get('Content-Type', 'image/jpeg')
+                image_data = response.content
+            else:
+                if not os.path.exists(path):
+                    return json.dumps({"error": f"Local image file not found: {path}"})
+                with open(path, 'rb') as f:
+                    image_data = f.read()
+                ext = os.path.splitext(path)[1].lower()
+                mime_map = {'.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp'}
+                mime_type = mime_map.get(ext, 'application/octet-stream')
+
+            contents.append(
+                {"inline_data": {"mime_type": mime_type, "data": base64.b64encode(image_data).decode()}}
+            )
+            contents.append(f"Image source: {path}")
+
+        except Exception as e:
+            return json.dumps({"error": f"Failed to process image at {path}: {str(e)}"})
+
+    try:
+        response = client.models.generate_content(
+            model='gemini-2.5-pro',
+            contents=contents
+        )
+
+        response_text = response.text.strip()
+        if response_text.startswith("```json"):
+            response_text = response_text[7:]
+        if response_text.endswith("```"):
+            response_text = response_text[:-3]
+
+        try:
+            json.loads(response_text)
+            return response_text
+        except json.JSONDecodeError:
+            return json.dumps({
+                "error": "The model did not return a valid JSON object.",
+                "raw_response": response_text
+            })
+
+    except Exception as e:
+        return json.dumps({"error": f"Error during Gemini API call: {str(e)}"})

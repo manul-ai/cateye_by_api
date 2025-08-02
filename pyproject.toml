@@ -11,6 +11,7 @@ dependencies = [
     "opencv-python>=4.11.0.86",
     "pandas>=2.3.0",
     "pillow>=11.2.1",
+    "playwright>=1.53.0",
     "python-dotenv>=1.1.1",
     "requests>=2.32.4",
     "segment-anything-py>=1.0.1",

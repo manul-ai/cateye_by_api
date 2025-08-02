@@ -103,31 +103,3 @@ def segment_image_to_chunks(image_path, output_dir=None, model_type="vit_b",
     
     print(f"Saved {len(chunk_paths)} chunks to {output_dir}")
     return chunk_paths
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description='Segment image into semantic chunks using SAM')
-    parser.add_argument('image_path', help='Path to the image file')
-    parser.add_argument('--output_dir', help='Output directory for chunks')
-    parser.add_argument('--model_type', default='vit_b', choices=['vit_b', 'vit_l', 'vit_h'],
-                       help='SAM model type (default: vit_b)')
-    parser.add_argument('--pred_iou_thresh', type=float, default=0.88,
-                       help='Prediction IoU threshold (higher = fewer chunks, default: 0.88)')
-    parser.add_argument('--stability_score_thresh', type=float, default=0.95,
-                       help='Stability score threshold (higher = more stable chunks, default: 0.95)')
-    parser.add_argument('--min_mask_region_area', type=int, default=100,
-                       help='Minimum mask area (removes tiny objects, default: 100)')
-    
-    args = parser.parse_args()
-    
-    if os.path.exists(args.image_path):
-        chunk_paths = segment_image_to_chunks(
-            args.image_path, 
-            args.output_dir, 
-            args.model_type,
-            args.pred_iou_thresh,
-            args.stability_score_thresh,
-            args.min_mask_region_area
-        )
-        print(f"Generated {len(chunk_paths)} semantic chunks")
-    else:
-        print("Image file not found!")
